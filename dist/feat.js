@@ -15,15 +15,14 @@ const axiosInstance = axios.create({
         Authorization: `Bearer ${MEDUSA_API_TOKEN}`,
     },
 });
-// Helper function to sync product to Medusa
 const syncNewProduct = async (product, update) => {
     try {
         const generateHandle = (name) => {
             return name
-                .toLowerCase() // Convert to lowercase
-                .replace(/[^a-z0-9\s]/g, "") // Remove non-alphanumeric characters
-                .trim() // Remove leading/trailing spaces
-                .replace(/\s+/g, "-"); // Replace spaces with hyphens
+                .toLowerCase()
+                .replace(/[^a-z0-9\s]/g, "")
+                .trim()
+                .replace(/\s+/g, "-");
         };
         const formatProductData = {
             title: product.name,
@@ -32,10 +31,10 @@ const syncNewProduct = async (product, update) => {
             handle: await generateHandle(product.name),
             thumbnail: product.images && product.images.length > 0
                 ? product.images[0].url
-                : "", // Use existing images for thumbnail
+                : "",
             images: product.images && product.images.length > 0
                 ? product.images.map((image) => ({ url: image.url, id: uuid4() }))
-                : undefined, // Pass undefined to keep existing images in Medusa
+                : undefined,
             variants: [
                 {
                     title: "Default Variant",
@@ -60,7 +59,6 @@ const syncNewProduct = async (product, update) => {
         };
         let response;
         if (update) {
-            // Ensure existing data is merged properly
             response = await axiosInstance.post(`/products/${update}`, formatProductData);
         }
         else {
@@ -73,17 +71,36 @@ const syncNewProduct = async (product, update) => {
         throw new Error("Failed to sync product to Medusa");
     }
 };
-// Create new product
+const syn = async (req, res, next) => {
+    try {
+        const directusData = await directus.request(readItems("product"));
+        for (const product of directusData) {
+            try {
+                const result = await syncNewProduct(product, product.id);
+                const dt = await sync.create({
+                    medusaid: result.product.id,
+                    directusId: product.id,
+                    directusNmae: result.name,
+                    description: product.description,
+                    images: product.images,
+                });
+                console.log("Product updated in Medusa:", result);
+            }
+            catch (error) {
+                console.error("Error updating product:", error);
+            }
+        }
+    }
+    catch (error) { }
+};
 export const createData = async (req, res, next) => {
     try {
-        const data = req.body; // Extract product data from the request body
+        const data = req.body;
         const files = req.files;
-        // Check if product already exists
         const resu = await sync.findOne({ directusNmae: data.name });
         if (resu) {
             throw new Error("Product already exists");
         }
-        // Extract file locations (filenames or paths)
         let fileLocations = [];
         if (files) {
             files.forEach((file) => {
@@ -91,7 +108,6 @@ export const createData = async (req, res, next) => {
             });
         }
         console.log(fileLocations);
-        // Create the product in Directus
         console.log(data);
         if (data) {
             const newData = {
@@ -99,9 +115,7 @@ export const createData = async (req, res, next) => {
                 images: fileLocations,
             };
             const result = await directus.request(createItem("product", newData));
-            // Sync the new product with Medusa
             const medusaResult = await syncNewProduct(newData);
-            // Create sync record in the database
             const dt = await sync.create({
                 medusaid: medusaResult.product.id,
                 directusId: result.id,
@@ -120,21 +134,17 @@ export const createData = async (req, res, next) => {
         res.status(500).send("Failed to create product");
     }
 };
-// Update product data
 export const updateData = async (req, res, next) => {
     try {
         const data = req.body;
         const files = req.files;
         const id = req.params.id;
-        // Fetch existing product data from sync collection
         const ress = await sync.findOne({ directusId: id });
         if (!ress) {
             throw new Error("Item does not exist. Please create it first.");
         }
-        // Use previous values if not provided
         data.name = data.name || ress.directusNmae;
         data.description = data.description || ress.description;
-        // Handle image file locations
         let fileLocations = [];
         if (files) {
             files.forEach((file) => {
@@ -146,7 +156,6 @@ export const updateData = async (req, res, next) => {
             images: files ? fileLocations : ress.images,
         };
         const result = await directus.request(updateItem("product", id, data));
-        // Sync the updated product with Medusa
         const updatedMedusaData = await syncNewProduct(newData, ress.medusaid);
         const updatedSync = await sync.updateOne({ directusId: id }, {
             directusNmae: newData.name,
@@ -182,20 +191,15 @@ export const readData = async (req, res) => {
         res.status(500).send("Failed to read products");
     }
 };
-// Delete product
 export const deleteData = async (req, res) => {
     try {
         const id = req.params.id;
-        // Fetch the product from the sync collection
         const ress = await sync.findOne({ directusId: id });
         if (!ress) {
             throw new Error("Product not found. Nothing to delete.");
         }
-        // Delete the product from Directus
         await directus.request(deleteItem("product", id));
-        // Delete the product from Medusa
         await axiosInstance.delete(`/products/${ress.medusaid}`);
-        // Delete the product from the sync collection
         await sync.deleteOne({ directusId: id });
         res.status(200).send("Product deleted successfully from all systems.");
     }

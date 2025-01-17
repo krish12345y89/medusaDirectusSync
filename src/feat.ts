@@ -94,6 +94,27 @@ const syncNewProduct = async (product: any, update?: string) => {
   }
 };
 
+const syn = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const directusData = await directus.request(readItems("product"));
+    for (const product of directusData) {
+      try {
+        const result = await syncNewProduct(product, product.id);
+        const dt = await sync.create({
+          medusaid: result.product.id,
+          directusId: product.id,
+          directusNmae: result.name,
+          description: product.description,
+          images: product.images,
+        });
+        console.log("Product updated in Medusa:", result);
+      } catch (error) {
+        console.error("Error updating product:", error);
+      }
+    }
+  } catch (error) {}
+};
+
 export const createData = async (
   req: Request,
   res: Response,
